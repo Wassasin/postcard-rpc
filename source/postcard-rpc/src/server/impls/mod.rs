@@ -5,8 +5,14 @@
 #[cfg(feature = "embassy-usb-0_5-server")]
 pub mod embassy_usb_v0_5;
 
+#[cfg(feature = "embassy-usb-0_6-server")]
+pub mod embassy_usb_v0_6;
+
 #[cfg(feature = "embedded-io-async-0_6-server")]
 pub mod embedded_io_async_v0_6;
+
+#[cfg(feature = "embedded-io-async-0_7-server")]
+pub mod embedded_io_async_v0_7;
 
 #[cfg(all(target_os = "linux", feature = "usb-gadget"))]
 pub mod usb_gadget;
@@ -16,15 +22,13 @@ pub mod test_channels;
 
 #[cfg(any(
     feature = "embassy-usb-0_5-server",
+    feature = "embassy-usb-0_6-server",
     feature = "embedded-io-async-0_6-server",
+    feature = "embedded-io-async-0_7-server",
 ))]
 pub(crate) mod embassy_shared {
     use crate::server::WireSpawn;
     use embassy_executor::{SpawnError, SpawnToken, Spawner};
-
-    //////////////////////////////////////////////////////////////////////////////
-    // SPAWN
-    //////////////////////////////////////////////////////////////////////////////
 
     /// A [`WireSpawn`] impl using the embassy executor
     #[derive(Clone)]
@@ -50,12 +54,16 @@ pub(crate) mod embassy_shared {
     }
 
     /// Attempt to spawn the given token
-    pub fn embassy_spawn<Sp, S: Sized>(sp: &Sp, tok: SpawnToken<S>) -> Result<(), Sp::Error>
+    pub fn embassy_spawn<Sp, S: Sized>(
+        sp: &Sp,
+        tok: Result<SpawnToken<S>, SpawnError>,
+    ) -> Result<(), Sp::Error>
     where
         Sp: WireSpawn<Error = SpawnError, Info = Spawner>,
     {
         let info = sp.info();
-        info.spawn(tok)
+        info.spawn(tok?);
+        Ok(())
     }
 }
 

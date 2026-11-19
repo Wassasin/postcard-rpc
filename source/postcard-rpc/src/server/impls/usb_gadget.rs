@@ -20,6 +20,9 @@ pub const DEFAULT_TIMEOUT_MS_PER_FRAME: usize = 2;
 pub const USB_FS_MAX_PACKET_SIZE: usize = 64;
 /// Default max packet size for USB High Speed
 pub const USB_HS_MAX_PACKET_SIZE: usize = 512;
+/// Device interface GUID WinUSB registers for the interface.
+pub const WINUSB_DEVICE_INTERFACE_GUID: uuid::Uuid =
+    uuid::uuid!("9c6ea63d-bc8d-4a33-b6b8-a00da4ee2e3c");
 
 /// A collection of types and aliases useful for importing the correct types
 pub mod dispatch_impl {
@@ -44,7 +47,7 @@ pub mod dispatch_impl {
 
     pub use crate::server::impls::tokio_shared::tokio_spawn as spawn_fn;
 
-    use usb_gadget::function::custom::Custom;
+    use usb_gadget::function::custom::{Association, Custom, OsExtCompat, OsExtProp};
     use usb_gadget::{Gadget, RegGadget};
 
     use crate::server::impls::usb_gadget::{UsbGadgetWireRx, UsbGadgetWireTx};
@@ -80,9 +83,18 @@ pub mod dispatch_impl {
             let (ep_tx, ep_tx_dir) = EndpointDirection::device_to_host();
             let (ep_rx, ep_rx_dir) = EndpointDirection::host_to_device();
 
+            let class = Class::vendor_specific(0x00, 0x00);
+            let iname = "postcard-rpc";
             let (mut custom, handle) = Custom::builder()
                 .with_interface(
-                    Interface::new(Class::vendor_specific(0, 0), "postcard-rpc")
+                    Interface::new(class, iname)
+                        .with_os_ext_compat(OsExtCompat::winusb())
+                        .with_os_ext_prop(OsExtProp::device_interface_guid(
+                            super::WINUSB_DEVICE_INTERFACE_GUID,
+                        ))
+                        // NOTE: IADs are currently broken on upstream usb-gadget - but we want this
+                        //       https://github.com/surban/usb-gadget/issues/25
+                        .with_association(&Association::new(class, iname))
                         .with_endpoint(Endpoint::bulk(ep_tx_dir))
                         .with_endpoint(Endpoint::bulk(ep_rx_dir)),
                 )
@@ -141,7 +153,7 @@ impl UsbGadgetWireTx {
     ) -> Self {
         let inner = UsbGadgetWireTxInner {
             ep_tx,
-            log_seq: 0,
+            log_seq: -1,
             tx_buf,
         };
 
@@ -155,7 +167,7 @@ impl UsbGadgetWireTx {
 #[derive(Debug)]
 struct UsbGadgetWireTxInner {
     ep_tx: EndpointSender,
-    log_seq: u16,
+    log_seq: i16,
     tx_buf: &'static mut [u8],
 }
 
@@ -207,9 +219,19 @@ impl WireTx for UsbGadgetWireTx {
             Ok::<(), WireTxErrorKind>(())
         };
 
-        tokio::time::timeout(timeout, send)
-            .await
-            .or(Err(WireTxErrorKind::Timeout))?
+        let res = match tokio::time::timeout(timeout, send).await {
+            Ok(res) => res,
+            Err(_) => Err(WireTxErrorKind::Timeout),
+        };
+
+        // Timeout OR an underlying io::Error from send_async
+        // EndpointSender::send_async might return errors of previously enqueued send operations,
+        // so in any case it's better to try to clean up  to prevent future transfers from hanging
+        if res.is_err() {
+            let _ = ep_tx.cancel();
+        }
+
+        res
     }
 
     async fn send_log_str(
@@ -230,7 +252,7 @@ impl WireTx for UsbGadgetWireTx {
                 VarKeyKind::Key8 => VarKey::Key8(LoggingTopic::TOPIC_KEY),
             };
             let ctr = *log_seq;
-            *log_seq = log_seq.wrapping_add(1);
+            *log_seq = if ctr == i16::MIN { -1 } else { ctr - 1 };
             let wh = VarHeader {
                 key,
                 seq_no: VarSeq::Seq2(ctr),
@@ -270,7 +292,7 @@ impl WireTx for UsbGadgetWireTx {
                 VarKeyKind::Key8 => VarKey::Key8(LoggingTopic::TOPIC_KEY),
             };
             let ctr = *log_seq;
-            *log_seq = log_seq.wrapping_add(1);
+            *log_seq = if ctr == i16::MIN { -1 } else { ctr - 1 };
             let wh = VarHeader {
                 key,
                 seq_no: VarSeq::Seq2(ctr),

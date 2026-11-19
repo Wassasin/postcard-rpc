@@ -35,7 +35,7 @@ cargo test \
     --no-default-features \
     --features=use-std,cobs-serial,raw-nusb
 
-# Host + wasm host-client impls
+# Host + wasm/webusb host-client impls
 RUSTFLAGS="--cfg=web_sys_unstable_apis" \
     cargo check \
         --manifest-path source/postcard-rpc/Cargo.toml \
@@ -49,6 +49,20 @@ RUSTFLAGS="--cfg=web_sys_unstable_apis" \
         --features=use-std,webusb \
         --target wasm32-unknown-unknown
 
+# Host + wasm/nusb host-client impls
+RUSTFLAGS="--cfg=web_sys_unstable_apis" \
+    cargo check \
+        --manifest-path source/postcard-rpc/Cargo.toml \
+        --no-default-features \
+        --features=raw-nusb \
+        --target wasm32-unknown-unknown
+RUSTFLAGS="--cfg=web_sys_unstable_apis" \
+    cargo build \
+        --manifest-path source/postcard-rpc/Cargo.toml \
+        --no-default-features \
+        --features=raw-nusb \
+        --target wasm32-unknown-unknown
+
 # Embedded + embassy server impl
 cargo check \
     --manifest-path source/postcard-rpc/Cargo.toml \
@@ -58,7 +72,17 @@ cargo check \
 cargo check \
     --manifest-path source/postcard-rpc/Cargo.toml \
     --no-default-features \
+    --features=embassy-usb-0_6-server \
+    --target thumbv7em-none-eabihf
+cargo check \
+    --manifest-path source/postcard-rpc/Cargo.toml \
+    --no-default-features \
     --features=embedded-io-async-0_6-server \
+    --target thumbv7em-none-eabihf
+cargo check \
+    --manifest-path source/postcard-rpc/Cargo.toml \
+    --no-default-features \
+    --features=embedded-io-async-0_7-server \
     --target thumbv7em-none-eabihf
 
 # USB gadget (OTG) server impl
